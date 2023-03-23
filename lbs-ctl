@@ -1,0 +1,208 @@
+#!/usr/bin/python
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (c) 2023 Samsung Electronics Co., Ltd. All Rights Reserved.
+#
+# Author:
+# Daniel Gomez <da.gomez@samsung.com>
+
+from __future__ import print_function
+from bcc import BPF
+from bcc.utils import printb
+from time import sleep
+import argparse
+import logging
+import sys
+import os
+
+try:
+    import colorlog
+    HAVE_COLORLOG = True
+except ImportError:
+    HAVE_COLORLOG = False
+    pass
+
+__version__ = "0.1"
+
+b = BPF(text="""
+""")
+
+
+def blk_mq_prog():
+    """
+    kprobe__blk_execute_rq_nowait
+    """
+
+    prog = """
+    #include <uapi/linux/ptrace.h>
+    #include <linux/blk-mq.h>
+    #include <linux/bio.h>
+    
+    struct blk_mq_data_t {
+        char comm[TASK_COMM_LEN];
+        u32 nr_phys_segments;
+        u16 bio_max_vecs;
+    };
+    
+    BPF_PERF_OUTPUT(blk_mq_events);
+    BPF_HISTOGRAM(bv_len);
+    BPF_HASH(bv_len_last);
+    
+    void kprobe__blk_execute_rq_nowait(struct pt_regs *ctx, struct request *req) 
+    {
+            struct blk_mq_data_t blk_mq_data = {};
+            u16 i;
+            u64 aux;
+    
+            bpf_get_current_comm(&blk_mq_data.comm, sizeof(blk_mq_data.comm));
+            blk_mq_data.nr_phys_segments = req->nr_phys_segments;
+            blk_mq_data.bio_max_vecs = BIO_MAX_VECS;
+    
+            blk_mq_events.perf_submit(ctx, &blk_mq_data, sizeof(blk_mq_data));
+
+            for (i=0; i<BIO_MAX_VECS; i++) {
+                    u64 idx=i;
+                    if (i >= req->bio->bi_vcnt)
+                            break;
+                    aux = req->bio->bi_io_vec[i].bv_len;
+                    if (aux == 0)
+                            break;
+                    bv_len.increment(bpf_log2l(aux));
+                    bv_len_last.lookup_or_try_init(&idx, &aux);
+            }
+    }
+    """
+    logging.debug(prog)
+    return prog
+
+
+def _logger_conf(args: argparse.Namespace) -> None:
+    """Setup the logging environment."""
+    log = logging.getLogger()
+    log.setLevel(logging.INFO)
+    format_str = "%(asctime)s - %(levelname)-8s - %(message)s"
+    date_format = "%Y-%m-%d %H:%M:%S"
+    formatter = logging.Formatter(format_str, date_format)
+    if os.isatty(2):
+        cformat = "%(log_color)s" + format_str
+        colors = {
+            "DEBUG": "reset",
+            "INFO": "bold_black",
+            "WARNING": "bold_yellow",
+            "ERROR": "bold_red",
+            "CRITICAL": "bold_red",
+        }
+        if HAVE_COLORLOG:
+            formatter = colorlog.ColoredFormatter(cformat, date_format, log_colors=colors)
+        else:
+            formatter = logging.Formatter(format_str, date_format)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    log.addHandler(stream_handler)
+    log.setLevel(logging.INFO)
+    _logger_level(args)
+    return
+
+
+def _logger_level(args: argparse.Namespace) -> None:
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+    return
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Large Block Size Analysis tool")
+    parser.add_argument(
+        "-d",
+        "--debug",
+        help="enable debug output",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-v",
+        "--version",
+        help="%(prog)s version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
+    subparser = parser.add_subparsers(help='sub command help', dest='cmd')
+    subparser.add_parser("blk-mq", help="blk-mq tracer")
+    return parser
+
+
+nr_phys_segments = bio_max_vecs = 0
+def print_bio_event(cpu, bio_data, size):
+    global nr_phys_segments, bio_max_vecs
+    bio_event = b["blk_mq_events"].event(bio_data)
+
+    comm = bio_event.comm.decode("utf8")
+    if (comm != "fio"):
+        return
+
+    nps = bio_event.nr_phys_segments
+    bmv = bio_event.bio_max_vecs
+    if (nps != nr_phys_segments):
+        logging.info("nr_phys_segments={nps}".format(nps=bio_event.nr_phys_segments))
+        nr_phys_segments = nps
+    if (bmv != bio_max_vecs):
+        logging.info("BIO_MAX_VECS={bmv}".format(bmv=bmv))
+        bio_max_vecs = bmv
+
+
+def blk_mq_trace():
+    global b
+    prog = blk_mq_prog()
+    logging.info("Loading blk-mq. Please, wait to launch the test...")
+    test_ex = "fio -iodepth=1 -rw=read -ioengine=io_uring_cmd -bs=64k -numjobs=1 -size=1G -filename=/dev/ng0n1 -name=io_uring_1 -loop=4"
+    logging.info("Execute the following test in other terminal:\n{test}".format(test=test_ex))
+    b = BPF(text=prog)
+    logging.info("Tracing enabled. Press 'Ctrl+C' to cancel.")
+    b["blk_mq_events"].open_perf_buffer(print_bio_event)
+    try:
+        while 1:
+            b.perf_buffer_poll()
+            sleep(0.1)
+    except KeyboardInterrupt:
+        print()
+
+    bv_len = b["bv_len"]
+    logging.info("log2 'bv_len' histogram")
+    bv_len.print_log2_hist("bv_len")
+    bv_len_last = b["bv_len_last"]
+
+    logging.info("Last 'bv_len'")
+    for k, v in sorted(bv_len_last.items(), key=lambda bv_len: bv_len[1].value):
+        logging.info("key: {}, value: {}".format(k.value, v.value))
+
+    logging.debug("blk-mq completed")
+
+
+def main() -> None:
+    """The tool."""
+    p = _parser()
+    args, _ = p.parse_known_args()
+
+    _logger_conf(args)
+
+    logging.info("Large Block Size Analysis tool")
+
+    if not args.cmd:
+        p.print_usage()
+        return
+
+    disp = { "blk-mq": blk_mq_trace }
+    disp[args.cmd]()
+
+
+if __name__ == "__main__":
+    ret = 0
+    try:
+        main()
+    except Exception:
+        ret = 1
+        import traceback
+
+        traceback.print_exc()
+    sys.exit(ret)
