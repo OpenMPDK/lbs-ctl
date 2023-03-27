@@ -13,6 +13,8 @@ import argparse
 import logging
 import sys
 import os
+import subprocess
+import json
 
 try:
     import colorlog
@@ -140,6 +142,25 @@ def _parser() -> argparse.ArgumentParser:
     subparser.add_parser("blk-mq", help="blk-mq tracer")
     return parser
 
+def _popen(
+    cmd: list[str], environ: dict[str, str] = {}, comm: bool = True
+) -> subprocess.Popen[bytes]:
+    try:
+        logging.debug(f"{' '.join(cmd)}")
+        p = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environ
+        )
+        if comm:
+            stdout, stderr = p.communicate()
+            if stdout:
+                logging.debug(stdout.decode("utf-8"))
+            if stderr:
+                logging.debug(stderr.decode("utf-8"))
+            logging.debug(f"Return code: {p.returncode}")
+        return p
+    except subprocess.CalledProcessError as exc:
+        sys.exit(exc.returncode)
+
 
 def print_watch(prev, new, name):
     if (prev != new):
@@ -199,6 +220,30 @@ def blk_mq_trace():
     logging.debug("blk-mq completed")
 
 
+def print_system_info():
+    # PAGE_SIZE
+    aux = _popen(["/usr/bin/getconf", "PAGE_SIZE"], comm=True)
+    page_size = aux.communicate()[0].decode("utf-8").replace("\n", "")
+    logging.info("PAGE_SIZE={page_size}".format(page_size=page_size))
+
+    # NVMe blk device
+    dev = ["nvme0n1"]
+    sysfs = ["hw_sector_size", "logical_block_size", "max_discard_segments", "max_hw_sectors_kb", "max_integrity_segments",
+             "max_sectors_kb", "max_integrity_segments", "max_sectors_kb", "max_segment_size", "max_segments", "minimum_io_size",
+             "nomerges", "nr_requests", "optimal_io_size", "physical_block_size", "scheduler"]
+    for d in dev:
+        for s in sysfs:
+            with open("/sys/class/block/{device}/queue/{sysfs}".format(device=d, sysfs=s), "r") as f:
+                logging.info("{device}: {sysfs}: {val}".format(device=d, sysfs=s, val=f.read().replace("\n", "")))
+
+    # NVMe mdts
+    dev = ["nvme0"]
+    for d in dev:
+        aux = _popen(["/usr/sbin/nvme", "id-ctrl", "/dev/{dev}".format(dev=d), "--output-format=json"])
+        mdts = json.loads(aux.communicate()[0].decode("utf-8"))["mdts"]
+        logging.info("{dev}: mdts: {mdts}".format(dev=d, mdts=mdts))
+
+
 def main() -> None:
     """The tool."""
     p = _parser()
@@ -211,6 +256,9 @@ def main() -> None:
     if not args.cmd:
         p.print_usage()
         return
+
+    # System & dev info
+    print_system_info()
 
     disp = { "blk-mq": blk_mq_trace }
     disp[args.cmd]()
