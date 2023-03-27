@@ -36,31 +36,40 @@ def blk_mq_prog():
     #include <uapi/linux/ptrace.h>
     #include <linux/blk-mq.h>
     #include <linux/bio.h>
-    
+
     struct blk_mq_data_t {
         char comm[TASK_COMM_LEN];
-        u32 nr_phys_segments;
+        /* struct bvec_iter */
+        u32 bi_size;
+        /* struct bio */
+        u16 bi_vcnt;
+        /* bio.h */
         u16 bio_max_vecs;
+        /* struct request */
+        u16 nr_phys_segments;
+        u32 __data_len;
     };
-    
+
     BPF_PERF_OUTPUT(blk_mq_events);
-    BPF_HISTOGRAM(bv_len);
-    BPF_HASH(bv_len_last);
-    
-    void kprobe__blk_execute_rq_nowait(struct pt_regs *ctx, struct request *req) 
+    BPF_HISTOGRAM(bv_len, u16, 64);
+    BPF_HASH(bv_len_last, u16, u16, 10240);
+
+    void kprobe__blk_execute_rq_nowait(struct pt_regs *ctx, struct request *req)
     {
             struct blk_mq_data_t blk_mq_data = {};
-            u16 i;
-            u64 aux;
-    
+            u16 i, aux;
+
             bpf_get_current_comm(&blk_mq_data.comm, sizeof(blk_mq_data.comm));
-            blk_mq_data.nr_phys_segments = req->nr_phys_segments;
+            blk_mq_data.bi_size = req->bio->bi_iter.bi_size;
+            blk_mq_data.bi_vcnt = req->bio->bi_vcnt;
             blk_mq_data.bio_max_vecs = BIO_MAX_VECS;
-    
+            blk_mq_data.nr_phys_segments = req->nr_phys_segments;
+            blk_mq_data.__data_len = req->__data_len;
+
             blk_mq_events.perf_submit(ctx, &blk_mq_data, sizeof(blk_mq_data));
 
             for (i=0; i<BIO_MAX_VECS; i++) {
-                    u64 idx=i;
+                    u16 idx=i; /* Avoid infinit loop detection in BCC */
                     if (i >= req->bio->bi_vcnt)
                             break;
                     aux = req->bio->bi_io_vec[i].bv_len;
@@ -113,7 +122,7 @@ def _logger_level(args: argparse.Namespace) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Large Block Size Analysis tool")
+    parser = argparse.ArgumentParser(description="Large LBA Block Size Analysis tool")
     parser.add_argument(
         "-d",
         "--debug",
@@ -132,23 +141,34 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-nr_phys_segments = bio_max_vecs = 0
+def print_watch(prev, new, name):
+    if (prev != new):
+        logging.info("{name}={new}".format(name=name, new=new))
+    return new
+
+nr_phys_segments = __data_len = 0
+bio_max_vecs = bi_size = bi_vcnt = 0
+bi_size_kb = __data_len_kb = 0
+phys_segment_len = 0
 def print_bio_event(cpu, bio_data, size):
-    global nr_phys_segments, bio_max_vecs
+    global nr_phys_segments, __data_len
+    global bio_max_vecs, bi_size, bi_vcnt
+    global bi_size_kb, __data_len_kb
+    global phys_segment_len
     bio_event = b["blk_mq_events"].event(bio_data)
 
     comm = bio_event.comm.decode("utf8")
     if (comm != "fio"):
         return
 
-    nps = bio_event.nr_phys_segments
-    bmv = bio_event.bio_max_vecs
-    if (nps != nr_phys_segments):
-        logging.info("nr_phys_segments={nps}".format(nps=bio_event.nr_phys_segments))
-        nr_phys_segments = nps
-    if (bmv != bio_max_vecs):
-        logging.info("BIO_MAX_VECS={bmv}".format(bmv=bmv))
-        bio_max_vecs = bmv
+    __data_len = print_watch(__data_len, bio_event.__data_len, "__data_len")
+    __data_len_kb = print_watch(__data_len_kb, int(bio_event.__data_len/1024), "__data_len_kb")
+    nr_phys_segments = print_watch(nr_phys_segments, bio_event.nr_phys_segments, "nr_phys_segments")
+    phys_segment_len = print_watch(phys_segment_len, int(bio_event.__data_len/bio_event.nr_phys_segments), "phys_segment_len")
+    bio_max_vecs = print_watch(bio_max_vecs, bio_event.bio_max_vecs, "BIO_MAX_VECS")
+    bi_size = print_watch(bi_size, bio_event.bi_size, "bi_size")
+    bi_size_kb = print_watch(bi_size_kb, int(bio_event.bi_size/1024), "bi_size_kb")
+    bi_vcnt = print_watch(bi_vcnt, bio_event.bi_vcnt, "bi_vcnt")
 
 
 def blk_mq_trace():
