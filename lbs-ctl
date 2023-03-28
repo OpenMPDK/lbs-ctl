@@ -29,17 +29,59 @@ b = BPF(text="""
 """)
 
 
-def blk_mq_prog():
+def blk_mq_prog(args: argparse.Namespace) -> str:
     """
-    kprobe__blk_execute_rq_nowait
+    blk-mq probes:
+
+    - blk_execute_rq_nowait:
+
+    hardware:*blk_execute_rq_nowait:
+    kfunc:blk_execute_rq_nowait
+        struct request * rq
+        bool at_head
+    kprobe:blk_execute_rq_nowait
+    software:*blk_execute_rq_nowait:
+
+    - nvme_setup_cmd:
+
+    hardware:*nvme_setup_cmd*:
+    kfunc:__traceiter_nvme_setup_cmd
+        void * __data
+        struct request * req
+        struct nvme_command * cmd
+        int retval
+    kfunc:nvme_setup_cmd
+        struct nvme_ns * ns
+        struct request * req
+        blk_status_t retval
+    kprobe:__traceiter_nvme_setup_cmd
+    kprobe:nvme_setup_cmd
+    software:*nvme_setup_cmd*:
+    tracepoint:nvme:nvme_setup_cmd
+        char disk[32]
+        int ctrl_id
+        int qid
+        u8 opcode
+        u8 flags
+        u8 fctype
+        u16 cid
+        u32 nsid
+        bool metadata
+        u8 cdw10[24]
     """
+
+    fc = {
+        "kprobe__blk_execute_rq_nowait": "void kprobe__blk_execute_rq_nowait(struct pt_regs *ctx, struct request *req)",
+        "kprobe__nvme_setup_cmd": "void kprobe__nvme_setup_cmd(struct pt_regs *ctx, struct nvme_ns *ns, struct request *req)"
+        }
+    probe = fc[args.probes]
 
     prog = """
     #include <uapi/linux/ptrace.h>
     #include <linux/blk-mq.h>
     #include <linux/bio.h>
 
-    struct blk_mq_data_t {
+    struct blk_mq_data_t {{
         char comm[TASK_COMM_LEN];
         /* struct bvec_iter */
         u32 bi_size;
@@ -50,15 +92,15 @@ def blk_mq_prog():
         /* struct request */
         u16 nr_phys_segments;
         u32 __data_len;
-    };
+    }};
 
     BPF_PERF_OUTPUT(blk_mq_events);
     BPF_HISTOGRAM(bv_len, u16, 64);
     BPF_HASH(bv_len_last, u16, u16, 10240);
 
-    void kprobe__blk_execute_rq_nowait(struct pt_regs *ctx, struct request *req)
-    {
-            struct blk_mq_data_t blk_mq_data = {};
+    {kprobe}
+    {{
+            struct blk_mq_data_t blk_mq_data = {{}};
             u16 i, aux;
 
             bpf_get_current_comm(&blk_mq_data.comm, sizeof(blk_mq_data.comm));
@@ -70,7 +112,7 @@ def blk_mq_prog():
 
             blk_mq_events.perf_submit(ctx, &blk_mq_data, sizeof(blk_mq_data));
 
-            for (i=0; i<BIO_MAX_VECS; i++) {
+            for (i=0; i<BIO_MAX_VECS; i++) {{
                     u16 idx=i; /* Avoid infinit loop detection in BCC */
                     if (i >= req->bio->bi_vcnt)
                             break;
@@ -79,9 +121,9 @@ def blk_mq_prog():
                             break;
                     bv_len.increment(bpf_log2l(aux));
                     bv_len_last.lookup_or_try_init(&idx, &aux);
-            }
-    }
-    """
+            }}
+    }}
+    """.format(kprobe=probe)
     logging.debug(prog)
     return prog
 
@@ -139,7 +181,8 @@ def _parser() -> argparse.ArgumentParser:
         version=f"%(prog)s {__version__}",
     )
     subparser = parser.add_subparsers(help='sub command help', dest='cmd')
-    subparser.add_parser("blk-mq", help="blk-mq tracer")
+    blk = subparser.add_parser("blk-mq", help="'struct request' (blk-mq) tracer")
+    blk.add_argument("probes", choices=["kprobe__blk_execute_rq_nowait", "kprobe__nvme_setup_cmd"])
     return parser
 
 def _popen(
@@ -192,9 +235,9 @@ def print_bio_event(cpu, bio_data, size):
     bi_vcnt = print_watch(bi_vcnt, bio_event.bi_vcnt, "bi_vcnt")
 
 
-def blk_mq_trace():
+def blk_mq_trace(args: argparse.Namespace) -> None:
     global b
-    prog = blk_mq_prog()
+    prog = blk_mq_prog(args)
     logging.info("Loading blk-mq. Please, wait to launch the test...")
     test_ex = "fio -iodepth=1 -rw=read -ioengine=io_uring_cmd -bs=64k -numjobs=1 -size=1G -filename=/dev/ng0n1 -name=io_uring_1 -loop=4"
     logging.info("Execute the following test in other terminal:\n{test}".format(test=test_ex))
@@ -261,7 +304,7 @@ def main() -> None:
     print_system_info()
 
     disp = { "blk-mq": blk_mq_trace }
-    disp[args.cmd]()
+    disp[args.cmd](args)
 
 
 if __name__ == "__main__":
