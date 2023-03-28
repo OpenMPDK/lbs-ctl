@@ -205,34 +205,36 @@ def _popen(
         sys.exit(exc.returncode)
 
 
-def print_watch(prev, new, name):
-    if (prev != new):
-        logging.info("{name}={new}".format(name=name, new=new))
-    return new
+def update_data(prev, new):
+    for p in prev.items():
+        _key = p[0]; _old = p[1]; _new = new[_key]
+        if (_old != _new):
+            prev[_key] = _new
+            logging.info("{key}: {old} -> {new}".format(key=_key, old=_old, new=_new))
 
-nr_phys_segments = __data_len = 0
-bio_max_vecs = bi_size = bi_vcnt = 0
-bi_size_kb = __data_len_kb = 0
-phys_segment_len = 0
+data_d = {
+    "nr_phys_segments": 0,
+    "__data_len": 0,
+    "bio_max_vecs": 0,
+    "bi_size": 0,
+    "bi_vcnt": 0,
+    }
 def print_bio_event(cpu, bio_data, size):
-    global nr_phys_segments, __data_len
-    global bio_max_vecs, bi_size, bi_vcnt
-    global bi_size_kb, __data_len_kb
-    global phys_segment_len
+    global data_d
     bio_event = b["blk_mq_events"].event(bio_data)
 
     comm = bio_event.comm.decode("utf8")
     if (comm != "fio"):
         return
 
-    __data_len = print_watch(__data_len, bio_event.__data_len, "__data_len")
-    __data_len_kb = print_watch(__data_len_kb, int(bio_event.__data_len/1024), "__data_len_kb")
-    nr_phys_segments = print_watch(nr_phys_segments, bio_event.nr_phys_segments, "nr_phys_segments")
-    phys_segment_len = print_watch(phys_segment_len, int(bio_event.__data_len/bio_event.nr_phys_segments), "phys_segment_len")
-    bio_max_vecs = print_watch(bio_max_vecs, bio_event.bio_max_vecs, "BIO_MAX_VECS")
-    bi_size = print_watch(bi_size, bio_event.bi_size, "bi_size")
-    bi_size_kb = print_watch(bi_size_kb, int(bio_event.bi_size/1024), "bi_size_kb")
-    bi_vcnt = print_watch(bi_vcnt, bio_event.bi_vcnt, "bi_vcnt")
+    data_current_d = {
+        "nr_phys_segments": bio_event.nr_phys_segments,
+        "__data_len": bio_event.__data_len,
+        "bio_max_vecs": bio_event.bio_max_vecs,
+        "bi_size": bio_event.bi_size,
+        "bi_vcnt": bio_event.bi_vcnt,
+        }
+    update_data(data_d, data_current_d)
 
 
 def blk_mq_trace(args: argparse.Namespace) -> None:
