@@ -1,0 +1,72 @@
+#!/usr/bin/bpftrace
+
+#ifndef BPFTRACE_HAVE_BTF
+#include <linux/blkdev.h>
+#include <linux/blk-mq.h>
+#include <linux/nvme.h>
+#include <linux/io_uring.h>
+#include "drivers/nvme/host/nvme.h"
+#endif /* BPFTRACE_HAVE_BTF */
+
+/*
+ * tracepoint:nvme:nvme_setup_cmd
+ *     char disk[32]
+ *     int ctrl_id
+ *     int qid
+ *     u8 opcode
+ *     u8 flags
+ *     u8 fctype
+ *     u16 cid
+ *     u32 nsid
+ *     bool metadata
+ *     u8 cdw10[24]
+ *
+ * kfunc:nvme_setup_cmd
+ *     struct nvme_ns * ns
+ *     struct request * req
+ *     blk_status_t retval
+ *
+ * kprobe:nvme_setup_cmd
+ *
+ */
+
+BEGIN
+{
+        printf("Tracing NVMe... Hit Ctrl-C to end.\n");
+}
+
+kprobe:nvme_uring_cmd_io
+{
+        @c = count();
+}
+
+tracepoint:nvme:nvme_pci_setup_prps
+{
+	@fx = count();
+        @test = args->ctrl_id;
+        $length = args->length;
+        @h_length = hist($length);
+}
+
+tracepoint:nvme:nvme_pci_setup_prps_nprps
+{
+	@fx_nprps = count();
+        $nprps = args->nprps;
+        $nr_allocations = args->nr_allocations;
+        @h_nprps = hist($nprps);
+        @h_nr_allocations = hist($nr_allocations);
+}
+
+tracepoint:nvme:nvme_pci_setup_prps_idx
+{
+	@fx_idx = count();
+        $idx = args->idx;
+        @h_idx = lhist($idx, 0, 100, 1);
+}
+
+END
+{
+        printf("\n*******************************************************************************\n");
+        printf("- tracing done");
+        printf("\n*******************************************************************************\n");
+}

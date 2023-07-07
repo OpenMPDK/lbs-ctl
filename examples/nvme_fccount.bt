@@ -1,0 +1,44 @@
+#!/usr/bin/bpftrace
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Copyright (c) 2023 Samsung Electronics Co., Ltd. All Rights Reserved.
+ *
+ * Author:
+ * Daniel Gomez <da.gomez@samsung.com>
+ */
+
+#include <linux/bvec.h>
+
+BEGIN
+{
+        printf("Tracing NVMe map data... Hit Ctrl-C to end.\n");
+}
+
+kprobe:nvme_pci_setup_prps,
+kprobe:nvme_pci_setup_sgls,
+kprobe:nvme_setup_prp_simple,
+kprobe:nvme_setup_sgl_simple
+{
+        @[func] = count();
+}
+
+tracepoint:nvme:nvme_test
+{
+        @prp1 = args->prp1;
+        @prp2 = args->prp2;
+        @prp1_len = args->prp1_len;
+}
+
+kprobe:nvme_setup_prp_simple
+{
+        @offset = ((struct bio_vec *)arg0)->bv_offset;
+}
+
+interval:s:1
+{
+        print(@);
+        print(@prp1);
+        print(@prp2);
+        print(@prp1_len);
+        print(@offset);
+}

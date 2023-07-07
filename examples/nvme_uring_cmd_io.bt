@@ -1,0 +1,44 @@
+#!/usr/bin/bpftrace
+
+#ifndef BPFTRACE_HAVE_BTF
+#include <linux/blkdev.h>
+#include <linux/blk-mq.h>
+#include <linux/nvme.h>
+#include <linux/io_uring.h>
+#include "drivers/nvme/host/nvme.h"
+#endif /* BPFTRACE_HAVE_BTF */
+
+BEGIN
+{
+	@ioopcode[0x00] = "nvme_cmd_flush";
+	$nvme_dev = "nvme0n1";
+	printf("\n%s:\n", $nvme_dev);
+	printf("max_hw_sectors_kb: ");
+	cat("/sys/block/%s/queue/max_hw_sectors_kb", $nvme_dev);
+	printf("\n");
+        printf("Tracing NVMe... Hit Ctrl-C to end.\n");
+}
+
+kprobe:nvme_setup_cmd
+{
+        $req = (struct request *)arg1;
+	$nr_phys_segments = $req->nr_phys_segments;
+	@segs = hist($nr_phys_segments);
+	@lh_segs = lhist($nr_phys_segments, 0, 129, 1);
+}
+
+kprobe:nvme_uring_cmd_io
+{
+        @c = count();
+	$issue_flags = arg3;
+	@cmd_op = ((struct io_uring_cmd *)arg2)->cmd_op;
+	@identified = ((struct nvme_ctrl *)arg0)->identified;
+	@h_flags = hist($issue_flags);
+}
+
+END
+{
+        printf("\n*******************************************************************************\n");
+        printf("- kprobe:nvme_uring_cmd_io + nvme_setup_cmd");
+        printf("\n*******************************************************************************\n");
+}
