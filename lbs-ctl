@@ -123,6 +123,27 @@ def blk_mq_prog(args: argparse.Namespace) -> str:
                     bv_len_last.lookup_or_try_init(&idx, &aux);
             }}
     }}
+
+    //BPF_PERF_OUTPUT(nvme_events);
+    //BPF_HISTOGRAM(allocs, u16, 64);
+
+    //struct nvme_data_t {{
+    //    char comm[TASK_COMM_LEN];
+    //    /* struct bvec_iter */
+    //    u32 nr_allocations;
+    //}};
+
+    //TRACEPOINT_PROBE(nvme, nvme_pci_setup_prps_nprps) {{
+    //        struct nvme_data_t nvme_data = {{}};
+
+    //        nvme_data.nr_allocations = args->nr_allocations;
+    //        allocs.increment(bpf_log2l(args->nr_allocations));
+
+    //        bpf_get_current_comm(&nvme_data.comm, sizeof(nvme_data.comm));
+
+    //        nvme_events.perf_submit(args, &nvme_data, sizeof(nvme_data));
+    //        return 0;
+    //}}
     """.format(kprobe=probe)
     logging.debug(prog)
     return prog
@@ -212,6 +233,14 @@ def update_data(prev, new):
             prev[_key] = _new
             logging.info("{key}: {old} -> {new}".format(key=_key, old=_old, new=_new))
 
+def update_data_nvme(prev, new):
+    for p in prev.items():
+        _key = p[0]; _old = p[1]; _new = new[_key]
+        if (_old != _new):
+            prev[_key] = _new
+            logging.warning("NVMe event!!!")
+            logging.info("{key}: {old} -> {new}".format(key=_key, old=_old, new=_new))
+
 data_d = {
     "nr_phys_segments": 0,
     "__data_len": 0,
@@ -236,6 +265,20 @@ def print_bio_event(cpu, bio_data, size):
         }
     update_data(data_d, data_current_d)
 
+nvme_data_d = {
+    "nr_allocations": 99,
+    }
+def print_nvme_event(cpu, nvme_data, size):
+    nvme_event = b["nvme_events"].event(nvme_data)
+
+    comm = nvme_event.comm.decode("utf8")
+    if (comm != "fio"):
+        return
+
+    nvme_data_current_d = {
+        "nr_allocations": nvme_event.nr_allocations,
+        }
+    update_data_nvme(nvme_data_d, nvme_data_current_d)
 
 def blk_mq_trace(args: argparse.Namespace) -> None:
     global b
@@ -246,6 +289,7 @@ def blk_mq_trace(args: argparse.Namespace) -> None:
     b = BPF(text=prog)
     logging.info("Tracing enabled. Press 'Ctrl+C' to cancel.")
     b["blk_mq_events"].open_perf_buffer(print_bio_event)
+    #b["nvme_events"].open_perf_buffer(print_nvme_event)
     try:
         while 1:
             b.perf_buffer_poll()
@@ -257,6 +301,10 @@ def blk_mq_trace(args: argparse.Namespace) -> None:
     logging.info("log2 'bv_len' histogram")
     bv_len.print_log2_hist("bv_len")
     bv_len_last = b["bv_len_last"]
+
+    allocs = b["allocs"]
+    logging.info("log2 'allocs' histogram")
+    allocs.print_log2_hist("allocs")
 
     logging.info("Last 'bv_len'")
     for k, v in sorted(bv_len_last.items(), key=lambda bv_len: bv_len[1].value):
