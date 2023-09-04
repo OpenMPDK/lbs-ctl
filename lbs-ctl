@@ -302,9 +302,9 @@ def blk_mq_trace(args: argparse.Namespace) -> None:
     bv_len.print_log2_hist("bv_len")
     bv_len_last = b["bv_len_last"]
 
-    allocs = b["allocs"]
-    logging.info("log2 'allocs' histogram")
-    allocs.print_log2_hist("allocs")
+    #allocs = b["allocs"]
+    #logging.info("log2 'allocs' histogram")
+    #allocs.print_log2_hist("allocs")
 
     logging.info("Last 'bv_len'")
     for k, v in sorted(bv_len_last.items(), key=lambda bv_len: bv_len[1].value):
