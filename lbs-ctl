@@ -123,27 +123,6 @@ def blk_mq_prog(args: argparse.Namespace) -> str:
                     bv_len_last.lookup_or_try_init(&idx, &aux);
             }}
     }}
-
-    //BPF_PERF_OUTPUT(nvme_events);
-    //BPF_HISTOGRAM(allocs, u16, 64);
-
-    //struct nvme_data_t {{
-    //    char comm[TASK_COMM_LEN];
-    //    /* struct bvec_iter */
-    //    u32 nr_allocations;
-    //}};
-
-    //TRACEPOINT_PROBE(nvme, nvme_pci_setup_prps_nprps) {{
-    //        struct nvme_data_t nvme_data = {{}};
-
-    //        nvme_data.nr_allocations = args->nr_allocations;
-    //        allocs.increment(bpf_log2l(args->nr_allocations));
-
-    //        bpf_get_current_comm(&nvme_data.comm, sizeof(nvme_data.comm));
-
-    //        nvme_events.perf_submit(args, &nvme_data, sizeof(nvme_data));
-    //        return 0;
-    //}}
     """.format(kprobe=probe)
     logging.debug(prog)
     return prog
@@ -325,9 +304,6 @@ def blk_mq_trace(args: argparse.Namespace) -> None:
     bv_len.print_log2_hist("bv_len")
     bv_len_last = b["bv_len_last"]
 
-    #allocs = b["allocs"]
-    #logging.info("log2 'allocs' histogram")
-    #allocs.print_log2_hist("allocs")
 
     logging.info("Last 'bv_len'")
     for k, v in sorted(bv_len_last.items(), key=lambda bv_len: bv_len[1].value):
