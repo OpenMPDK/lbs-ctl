@@ -187,11 +187,23 @@ def _logger_level(args: argparse.Namespace) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Large LBA Block Size Analysis tool")
+    parser = argparse.ArgumentParser(description="Large LBA Block Size Analysis tool",
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
         "-d",
         "--debug",
         help="enable debug output",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--dev",
+        type=str,
+        help="NVMe device",
+        default="/dev/nvme0n1",
+    )
+    parser.add_argument(
+        "--info",
+        help="Print system and device info",
         action="store_true",
     )
     parser.add_argument(
@@ -313,28 +325,95 @@ def blk_mq_trace(args: argparse.Namespace) -> None:
     logging.debug("blk-mq completed")
 
 
-def print_system_info():
-    # PAGE_SIZE
+def __print_table(_table) -> None:
+    for r in range(0, len(_table[0])):
+        logging.info('| {:>22} | {:>20} |'.format(_table[0][r], _table[1][r]))
+
+
+def __print_block_layer_info(device: str, sysfs: list[str]) -> None:
+    nvme = device.replace("/dev/", "")
+    _table = [[],[]]
+    for s in sysfs:
+        with open("/sys/class/block/{device}/queue/{sysfs}".format(device=nvme, sysfs=s), "r") as f:
+            val = f.read().replace("\n", "")
+            _table[0].append(s)
+            _table[1].append(val)
+    __print_table(_table)
+
+
+def _print_block_layer_info(device: str, debug: bool) -> None:
+    logging.info("| {:>} {:>21} |".format("Block layer information", device))
+    sysfs = ["hw_sector_size", "logical_block_size", "max_hw_sectors_kb",
+             "max_sectors_kb", "max_segments", "minimum_io_size",
+             "optimal_io_size", "physical_block_size"]
+    if debug:
+        sysfs.extend(["max_discard_segments", "max_integrity_segments",
+                      "max_segment_size", "nomerges", "nr_requests",
+                      "scheduler"])
+    __print_block_layer_info(device, sysfs)
+
+
+def _print_nvmecli_info(device: str, debug: bool) -> None:
+    logging.info("| {:>} {:>20} |".format("Block device information", device))
+    nvme = device.replace("/dev/", "")
+
+    idctrl = _popen(["/usr/sbin/nvme", "id-ctrl",
+                     "/dev/{dev}".format(dev=nvme), "--output-format=json"])
+    idctrl = idctrl.communicate()[0].decode("utf-8")
+
+    idns = _popen(["/usr/sbin/nvme", "id-ns", "/dev/{dev}".format(dev=nvme),
+                   "--output-format=json"])
+    idns = idns.communicate()[0].decode("utf-8")
+
+    mdts = json.loads(idctrl)["mdts"]
+    sn = json.loads(idctrl)["sn"].strip()
+    mn = json.loads(idctrl)["mn"].strip()
+    lbaf = json.loads(idns)["lbafs"]
+    lba_list = []
+    for lba in lbaf:
+        lbads = lba["ds"]
+        if lbads not in lba_list:
+            lba_list.append(lbads)
+
+    nlbaf = json.loads(idns)["nlbaf"]
+    nawun = json.loads(idns)["nawun"]
+    nawupf = json.loads(idns)["nawupf"]
+    npwg = json.loads(idns)["npwg"]
+    nows = json.loads(idns)["nows"]
+
+    _table = [["mdts", "nlbaf", "nawun", "nawupf", "npwg", "nows", "lbaf(ds)"], 
+              [mdts, nlbaf, nawun, nawupf, npwg, nows, str(lba_list)]]
+
+    if debug:
+        _table[0].extend(["sn", "mn"])
+        _table[1].extend([sn, mn])
+
+    __print_table(_table)
+
+
+def _print_system_info(debug: bool):
+    with open("/etc/hostname", "r") as f:
+        hostname = f.read().replace("\n", "")
     aux = _popen(["/usr/bin/getconf", "PAGE_SIZE"], comm=True)
+
+    logging.info("| {:>45} |".format("System information"))
+
     page_size = aux.communicate()[0].decode("utf-8").replace("\n", "")
-    logging.info("PAGE_SIZE={page_size}".format(page_size=page_size))
 
-    # NVMe blk device
-    dev = ["nvme0n1"]
-    sysfs = ["hw_sector_size", "logical_block_size", "max_discard_segments", "max_hw_sectors_kb", "max_integrity_segments",
-             "max_sectors_kb", "max_integrity_segments", "max_sectors_kb", "max_segment_size", "max_segments", "minimum_io_size",
-             "nomerges", "nr_requests", "optimal_io_size", "physical_block_size", "scheduler"]
-    for d in dev:
-        for s in sysfs:
-            with open("/sys/class/block/{device}/queue/{sysfs}".format(device=d, sysfs=s), "r") as f:
-                logging.info("{device}: {sysfs}: {val}".format(device=d, sysfs=s, val=f.read().replace("\n", "")))
+    _table = [["PAGE_SIZE"], [page_size]]
+    if debug:
+        _table[0].extend(["hostname"])
+        _table[1].extend([hostname])
+    __print_table(_table)
 
-    # NVMe mdts
-    dev = ["nvme0"]
-    for d in dev:
-        aux = _popen(["/usr/sbin/nvme", "id-ctrl", "/dev/{dev}".format(dev=d), "--output-format=json"])
-        mdts = json.loads(aux.communicate()[0].decode("utf-8"))["mdts"]
-        logging.info("{dev}: mdts: {mdts}".format(dev=d, mdts=mdts))
+
+def print_system_info(args: argparse.Namespace) -> None:
+
+    _print_system_info(args.debug)
+
+    for d in [args.dev]:
+        _print_block_layer_info(d, args.debug)
+        _print_nvmecli_info(d, args.debug)
 
 
 def main() -> None:
@@ -346,12 +425,13 @@ def main() -> None:
 
     logging.info("Large Block Size Analysis tool")
 
+    # System & dev info
+    if args.info:
+        print_system_info(args)
+
     if not args.cmd:
         p.print_usage()
         return
-
-    # System & dev info
-    print_system_info()
 
     disp = { "blk-mq": blk_mq_trace }
     disp[args.cmd](args)
