@@ -216,6 +216,7 @@ def _parser() -> argparse.ArgumentParser:
     subparser = parser.add_subparsers(help='sub command help', dest='cmd')
     blk = subparser.add_parser("blk-mq", help="'struct request' (blk-mq) tracer")
     blk.add_argument("probes", choices=["kprobe__blk_execute_rq_nowait", "kprobe__nvme_setup_cmd"])
+    nvme_cmd = subparser.add_parser("nvme-cmd-len", help="'NVMe command length tracer")
     return parser
 
 def _popen(
@@ -291,6 +292,16 @@ def print_nvme_event(cpu, nvme_data, size):
         "nr_allocations": nvme_event.nr_allocations,
         }
     update_data_nvme(nvme_data_d, nvme_data_current_d)
+
+
+def nvme_cmd_len(args: argparse.Namespace) -> None:
+    try:
+        cmd = ["/root/lbs-ctl/scripts/check_nvme_block_len.bt"]
+        subprocess.call(cmd)
+    except KeyboardInterrupt:
+        return
+    return
+
 
 def blk_mq_trace(args: argparse.Namespace) -> None:
     global b
@@ -433,7 +444,8 @@ def main() -> None:
         p.print_usage()
         return
 
-    disp = { "blk-mq": blk_mq_trace }
+    disp = { "blk-mq": blk_mq_trace, "nvme-cmd-len": nvme_cmd_len }
+
     disp[args.cmd](args)
 
 

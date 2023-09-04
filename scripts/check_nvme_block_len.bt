@@ -1,0 +1,34 @@
+#!/usr/bin/bpftrace
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Copyright (c) 2023 Samsung Electronics Co., Ltd. All Rights Reserved.
+ *
+ * Author:
+ * Daniel Gomez <da.gomez@samsung.com>
+ */
+#ifndef BPFTRACE_HAVE_BTF
+#include <linux/blkdev.h>
+#include <linux/blk-mq.h>
+#include <linux/nvme.h>
+#include <linux/io_uring.h>
+#include "drivers/nvme/host/nvme.h"
+#endif /* BPFTRACE_HAVE_BTF */
+
+BEGIN
+{
+	printf("Tracing NVMe command size... Hit Ctrl-C to end.\n");
+}
+
+kprobe:nvme_setup_cmd
+{
+	$ns = (struct nvme_ns *)arg0;
+	$lba_shift = $ns->lba_shift;
+	$req = (struct request *)arg1;
+	@c_data_len[$req->__data_len] = count();
+	@h_data_len = hist($req->__data_len);
+}
+
+END
+{
+	printf("\nTracing completed. Results:")
+}
