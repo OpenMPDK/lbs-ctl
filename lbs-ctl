@@ -166,7 +166,7 @@ def _logger_level(args: argparse.Namespace) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Large LBA Block Size Analysis tool",
+    parser = argparse.ArgumentParser(description="Large Block Size Analysis tool",
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
         "-d",
