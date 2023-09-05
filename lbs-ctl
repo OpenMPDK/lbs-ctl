@@ -275,7 +275,7 @@ def print_nvme_event(cpu, nvme_data, size):
 
 def nvme_cmd_len(args: argparse.Namespace) -> None:
     try:
-        cmd = ["/root/lbs-ctl/scripts/check_nvme_block_len.bt"]
+        cmd = ["{}/scripts/check_nvme_block_len.bt".format(os.getcwd())]
         subprocess.call(cmd)
     except KeyboardInterrupt:
         return
