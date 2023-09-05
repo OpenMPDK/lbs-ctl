@@ -21,14 +21,20 @@ BEGIN
 
 kprobe:nvme_setup_cmd
 {
+	$req = (struct request *)arg1;
+	$disk = $req->q->disk->disk_name;
+
+	if ($disk != str($1)) {
+		return;
+	}
+
 	$ns = (struct nvme_ns *)arg0;
 	$lba_shift = $ns->lba_shift;
-	$req = (struct request *)arg1;
 	@c_data_len[$req->__data_len] = count();
 	@h_data_len = hist($req->__data_len);
 }
 
 END
 {
-	printf("\nTracing completed. Results:")
+	printf("\nTracing completed. Results:");
 }
