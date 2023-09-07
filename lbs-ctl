@@ -343,6 +343,18 @@ def _print_block_layer_info(device: str, debug: bool) -> None:
     __print_block_layer_info(device, sysfs)
 
 
+def _get_json_value(data, param):
+    if param in data:
+        return data[param]
+    return "-"
+
+
+def _get_json_lbaf(data, param):
+    if param in data:
+        return data[param]
+    return []
+
+
 def _print_nvmecli_info(device: str, debug: bool) -> None:
     logging.info("| {:>} {:>20} |".format("Block device information", device))
     nvme = device.replace("/dev/", "")
@@ -350,29 +362,31 @@ def _print_nvmecli_info(device: str, debug: bool) -> None:
     idctrl = _popen(["/usr/sbin/nvme", "id-ctrl",
                      "/dev/{dev}".format(dev=nvme), "--output-format=json"])
     idctrl = idctrl.communicate()[0].decode("utf-8")
+    idctrl = json.loads(idctrl)
 
     idns = _popen(["/usr/sbin/nvme", "id-ns", "/dev/{dev}".format(dev=nvme),
                    "--output-format=json"])
     idns = idns.communicate()[0].decode("utf-8")
+    idns = json.loads(idns)
 
-    mdts = json.loads(idctrl)["mdts"]
-    sn = json.loads(idctrl)["sn"].strip()
-    mn = json.loads(idctrl)["mn"].strip()
-    lbaf = json.loads(idns)["lbafs"]
-    lba_list = []
-    for lba in lbaf:
-        lbads = lba["ds"]
-        if lbads not in lba_list:
-            lba_list.append(lbads)
+    mdts = _get_json_value(idctrl, "mdts")
+    sn = _get_json_value(idctrl, "sn").strip()
+    mn = _get_json_value(idctrl, "mn").strip()
 
-    nlbaf = json.loads(idns)["nlbaf"]
-    nawun = json.loads(idns)["nawun"]
-    nawupf = json.loads(idns)["nawupf"]
-    npwg = json.loads(idns)["npwg"]
-    nows = json.loads(idns)["nows"]
+    lbaf = _get_json_lbaf(idns, "lbafs")
+    lba_list = ""
+    if lbaf:
+        lba_list = list(set(lba["ds"] for lba in lbaf))
+        lba_list = ", ".join(str(v) for v in lba_list)
+
+    nlbaf = _get_json_value(idns, "nlbaf")
+    nawun = _get_json_value(idns, "nawun")
+    nawupf = _get_json_value(idns, "nawupf")
+    npwg = _get_json_value(idns, "npwg")
+    nows = _get_json_value(idns, "nows")
 
     _table = [["mdts", "nlbaf", "nawun", "nawupf", "npwg", "nows", "lbaf(ds)"], 
-              [mdts, nlbaf, nawun, nawupf, npwg, nows, str(lba_list)]]
+              [mdts, nlbaf, nawun, nawupf, npwg, nows, lba_list]]
 
     if debug:
         _table[0].extend(["sn", "mn"])
