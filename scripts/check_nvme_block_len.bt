@@ -28,6 +28,11 @@ kprobe:nvme_setup_cmd
 		return;
 	}
 
+	$req_op = $req->cmd_flags & 0xff;
+	if ($req_op != $2) {
+		return;
+	}
+
 	$ns = (struct nvme_ns *)arg0;
 	$lba_shift = $ns->lba_shift;
 	@c_data_len[$req->__data_len] = count();

@@ -195,7 +195,13 @@ def _parser() -> argparse.ArgumentParser:
     subparser = parser.add_subparsers(help='sub command help', dest='cmd')
     blk = subparser.add_parser("blk-mq", help="'struct request' (blk-mq) tracer")
     blk.add_argument("probes", choices=["kprobe__blk_execute_rq_nowait", "kprobe__nvme_setup_cmd"])
-    nvme_cmd = subparser.add_parser("nvme-cmd-len", help="'NVMe command length tracer")
+    nvme_cmd = subparser.add_parser("nvme-cmd-len", help="'NVMe command length tracer", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    nvme_cmd.add_argument(
+        "--filter",
+        type=int,
+        help="request operation filter. Check enum req_op in blk_types.h",
+        default=1,
+    )
     return parser
 
 def _popen(
@@ -274,11 +280,19 @@ def print_nvme_event(cpu, nvme_data, size):
 
 
 def nvme_cmd_len(args: argparse.Namespace) -> None:
-    logging.debug("Tracing commands length for {}".format(args.dev))
+    req_op = {
+              0: "REQ_OP_READ",
+              1: "REQ_OP_WRITE"}
+
+    rop = "Unknown"
+    if args.filter in req_op:
+        rop = req_op[args.filter]
+
+    logging.debug("Tracing length of '{}' commands for {}".format(rop, args.dev))
     nvme = args.dev.replace("/dev/", "")
     try:
         cmd = ["{}/scripts/check_nvme_block_len.bt".format(os.getcwd()),
-               "{}".format(nvme)]
+               "{}".format(nvme), str(args.filter)]
         subprocess.call(cmd)
     except KeyboardInterrupt:
         return
