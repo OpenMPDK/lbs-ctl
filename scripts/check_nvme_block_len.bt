@@ -33,10 +33,22 @@ kprobe:nvme_setup_cmd
 		return;
 	}
 
+	@_disk = str($1);
+	@comm_interval[comm] = count();
+	@comm[comm] = count();
+
 	$ns = (struct nvme_ns *)arg0;
 	$lba_shift = $ns->lba_shift;
 	@c_data_len[$req->__data_len] = count();
 	@h_data_len = hist($req->__data_len);
+}
+
+interval:s:30
+{
+	printf("\n\nDevice stats (%s)\n", @_disk);
+	print(@c_data_len);
+	print(@comm_interval);
+	clear(@comm_interval);
 }
 
 END
