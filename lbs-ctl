@@ -138,11 +138,11 @@ def _logger_conf(args: argparse.Namespace) -> None:
     if os.isatty(2):
         cformat = "%(log_color)s" + format_str
         colors = {
-            "DEBUG": "reset",
-            "INFO": "bold_black",
-            "WARNING": "bold_yellow",
-            "ERROR": "bold_red",
-            "CRITICAL": "bold_red",
+            "DEBUG": "cyan",
+            "INFO": "white",
+            "WARNING": "yellow",
+            "ERROR": "red",
+            "CRITICAL": "red",
         }
         if HAVE_COLORLOG:
             formatter = colorlog.ColoredFormatter(cformat, date_format, log_colors=colors)
