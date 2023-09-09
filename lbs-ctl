@@ -1,6 +1,12 @@
 #!/usr/bin/python3
-# SPDX-License-Identifier: GPL-2.0-only
+# SPDX-License-Identifier: Apache-2.0
+# lbs-ctl: Command line tool for tracking and observe Large Block Sizes in
+# the Linux storage stack.
+#
+# https://kernelnewbies.org/KernelProjects/large-block-size
+#
 # Copyright (c) 2023 Samsung Electronics Co., Ltd. All Rights Reserved.
+# Licensed under the Apache License, Version 2.0 (the "License")
 #
 # Author:
 # Daniel Gomez <da.gomez@samsung.com>
@@ -202,6 +208,17 @@ def _parser() -> argparse.ArgumentParser:
         help="request operation filter. Check enum req_op in blk_types.h",
         default=1,
     )
+    nvme_cmd.add_argument(
+        "--blocksize",
+        type=int,
+        help="block size (in bytes) to check for aligment (power of 2).",
+        default=16384,
+    )
+    nvme_cmd.add_argument(
+        "--dtracing",
+        help="enable debug tracing when running bpftrace.",
+        action="store_true",
+    )
     return parser
 
 def _popen(
@@ -292,7 +309,8 @@ def nvme_cmd_len(args: argparse.Namespace) -> None:
     nvme = args.dev.replace("/dev/", "")
     try:
         cmd = ["{}/scripts/check_nvme_block_len.bt".format(os.getcwd()),
-               "{}".format(nvme), str(args.filter)]
+               "{}".format(nvme), str(args.filter), str(args.blocksize),
+               str(int(args.dtracing))]
         subprocess.call(cmd)
     except KeyboardInterrupt:
         return
