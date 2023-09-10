@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
  * Observability of the block size for a given operation and drive to check for
- * alignment in size and Logical Block Address (LBA) of a given boundary (in 
+ * alignment in size and Logical Block Address (LBA) of a given boundary (in
  * bytes).
  *
  * Notes:
