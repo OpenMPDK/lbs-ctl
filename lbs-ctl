@@ -20,6 +20,7 @@ import logging
 import os
 import subprocess
 import sys
+import shutil
 from time import sleep
 
 from bcc import BPF
@@ -525,6 +526,12 @@ def print_system_info(args: argparse.Namespace) -> None:
 
 def main() -> None:
     """The tool."""
+    reqs =  [ { "prog": "bpftrace", "pkg": "bpftrace" } ]
+    reqs += [ { "prog": "nvme",     "pkg": "nvme-cli" } ]
+    for r in reqs:
+        if shutil.which(r['prog']) is None:
+            print("You need to install %s" % r['pkg'])
+            sys.exit(1)
     p = _parser()
     args, _ = p.parse_known_args()
 
