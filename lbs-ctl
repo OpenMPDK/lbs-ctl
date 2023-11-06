@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 import shutil
+import pathlib
 from time import sleep
 
 from bcc import BPF
@@ -534,6 +535,16 @@ def main() -> None:
             sys.exit(1)
     p = _parser()
     args, _ = p.parse_known_args()
+
+    for d in [args.dev]:
+        dp = pathlib.Path(d)
+        if not dp.is_block_device():
+            print("No NVMe drive found: %s" % d)
+            sys.exit(1)
+        dev = d.replace("/dev/", "")
+        if not os.path.isdir("/sys/class/block/%s/queue/" % dev):
+            print("Device not an NVMe drive: %s" % d)
+            sys.exit(1)
 
     _logger_conf(args)
 
